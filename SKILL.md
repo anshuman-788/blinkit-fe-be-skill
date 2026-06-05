@@ -32,6 +32,10 @@ If none exists → add `⚠ Raise PO` alert. Quantity decision is left to the us
 **Scope:** Feeder Warehouses only. Filter: include only rows where `backend_facility_name`
 contains the string "Feeder Warehouse". Exclude CPC, Super Store, CC-DTS, and other facility types.
 
+**Closed facilities:** Always exclude the following facilities permanently — they are no longer
+operational:
+- `Bengaluru B4 - Feeder Warehouse` (closed)
+
 ---
 
 ## Step 0 — First-Run Setup
@@ -128,8 +132,10 @@ def to_date(v):
         return (date(1899, 12, 30) + timedelta(days=int(v))).isoformat()
     return str(v).strip()
 
+CLOSED_FACILITIES = {"Bengaluru B4 - Feeder Warehouse"}
+
 def is_feeder(name):
-    return "Feeder Warehouse" in str(name)
+    return "Feeder Warehouse" in str(name) and str(name).strip() not in CLOSED_FACILITIES
 
 # ── Fetch FE/BE data ──────────────────────────────────────────────────────────
 febe_rows = fetch(cfg["fe_be_tab"])
@@ -278,6 +284,42 @@ for pid, name, r in po_alerts:
     n += 1
 if not po_alerts:
     print("  None.")
+
+# ── DEEP RED MATRIX: SKU Name | PID | Facility columns ───────────────────────
+matrix = {}
+dr_facs = set()
+dr_pids = set()
+for pid, pid_rows in data.items():
+    for r in pid_rows:
+        if r["flag"] == "🔴 DEEP RED":
+            matrix[(pid, r["facility"])] = r["ratio"]
+            dr_facs.add(r["facility"])
+            dr_pids.add(pid)
+
+if matrix:
+    facs_sorted = sorted(dr_facs)
+    pids_sorted = sorted(dr_pids)
+
+    def short_fac(f):
+        return (f.replace(" - Feeder Warehouse", "").replace(" Feeder Warehouse", "")
+                 .replace("Farukhnagar - SR", "Frkh-SR"))
+
+    col_headers = [short_fac(f) for f in facs_sorted]
+
+    print(f"\n\n━━━ DEEP RED MATRIX  |  FE% only  |  Blank = not DEEP RED ━━━\n")
+    header = "| SKU Name | PID | " + " | ".join(col_headers) + " |"
+    sep    = "|----------|-----|" + "|".join([":------:"] * len(col_headers)) + "|"
+    print(header)
+    print(sep)
+    for pid in pids_sorted:
+        sku_label = pid_names.get(pid, str(pid))[:35]
+        cells = []
+        for fac in facs_sorted:
+            if (pid, fac) in matrix:
+                cells.append(f"{matrix[(pid, fac)]*100:.1f}%")
+            else:
+                cells.append("—")
+        print(f"| {sku_label} | {pid} | " + " | ".join(cells) + " |")
 ```
 
 ---
